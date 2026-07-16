@@ -1,0 +1,18 @@
+{% extends "base.html" %}
+{% block title %}{{ error.title }} — VulnNote Manager{% endblock %}
+{% block content %}
+  <section class="error-panel" aria-labelledby="error-title">
+    <p class="eyebrow">エラー {{ status_code }}</p>
+    <h1 id="error-title">{{ error.title }}</h1>
+    <dl class="error-details">
+      <dt>何が起きたか</dt>
+      <dd>{{ error.what_happened }}</dd>
+      <dt>保存状態</dt>
+      <dd>{{ error.save_state }}</dd>
+      <dt>次の対処</dt>
+      <dd>{{ error.next_action }}</dd>
+    </dl>
+    {% if incident_id %}<p class="incident-id">問い合わせ用番号: {{ incident_id }}</p>{% endif %}
+    <p><a class="button" href="{{ url_for('main.index') }}">ホームへ戻る</a></p>
+  </section>
+{% endblock %}

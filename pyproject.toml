@@ -1,0 +1,28 @@
+[build-system]
+requires = ["setuptools>=75"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "vulnnote-manager"
+version = "0.1.0"
+description = "脆弱性診断メモを安全に整理するローカルWebアプリケーション"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "Flask>=3.1,<4",
+    "openai>=2,<3",
+    "Pillow>=11,<13",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8,<10"]
+
+[tool.pytest.ini_options]
+addopts = "-ra"
+testpaths = ["tests"]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+vulnnote_manager = ["templates/**/*.html", "static/**/*.css", "static/**/*.js"]
