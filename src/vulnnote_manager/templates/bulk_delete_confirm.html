@@ -1,0 +1,7 @@
+{% extends "base.html" %}
+{% block title %}複数削除確認 | VulnNote Manager{% endblock %}
+{% block content %}
+<nav class="breadcrumbs" aria-label="パンくず"><a href="{{ url_for('catalog.' ~ entity ~ 's') }}">一覧</a> / 複数削除確認</nav>
+<div class="page-header"><div><p class="eyebrow">取り消せない操作</p><h1>選択項目の削除確認</h1></div></div>
+<section class="panel"><p>{{ assessments|length }}件を再評価しました。ロック中の項目と、配下にロックがある項目は削除せず残します。</p><ul>{% for item in assessments %}<li>ID {{ item.record_id }} — {{ '削除可能' if item.allowed else item.reason }}</li>{% endfor %}</ul><form method="post"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><input type="hidden" name="selection_scope" value="{{ selection_scope }}"><input type="hidden" name="confirmed" value="1">{% for record_id in selected_ids %}<input type="hidden" name="selected_id" value="{{ record_id }}">{% endfor %}<div class="actions"><button class="button button-danger" type="submit">削除可能な項目を削除する</button><a href="{{ url_for('catalog.' ~ entity ~ 's') }}">キャンセル</a></div></form></section>
+{% endblock %}

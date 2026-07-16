@@ -24,7 +24,7 @@ def connection(tmp_path: Path):
 
 
 def test_initial_migration_creates_schema_indexes_and_version(connection) -> None:
-    assert connection.execute("PRAGMA user_version").fetchone()[0] == 1
+    assert connection.execute("PRAGMA user_version").fetchone()[0] == len(database_module.MIGRATIONS)
     tables = {row[0] for row in connection.execute("SELECT name FROM sqlite_master WHERE type='table'")}
     assert {"projects", "targets", "vulnerability_notes", "screenshots"} <= tables
     indexes = {row[0] for row in connection.execute("SELECT name FROM sqlite_master WHERE type='index'")}

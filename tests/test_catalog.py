@@ -30,6 +30,7 @@ def _create_target(client, project_id: int, *, name: str = "Webアプリ") -> in
 def _create_note(
     client, target_id: int, *, title: str = "XSS", severity: str = "High",
     status: str = "未確認", vulnerability_type: str = "クロスサイトスクリプティング（XSS）",
+    discovered_at: str = "2026-07-16T12:00",
 ) -> int:
     client.get(f"/targets/{target_id}/notes/new")
     response = client.post(
@@ -37,7 +38,7 @@ def _create_note(
         data={
             "csrf_token": _csrf(client), "title": title, "severity": severity, "status": status,
             "vulnerability_type": vulnerability_type,
-            "discovered_at": "2026-07-16T12:00", "timezone_offset": "-540",
+            "discovered_at": discovered_at, "timezone_offset": "-540",
             "evidence": "GET /?q=<script>alert(1)</script>",
         },
     )
@@ -171,6 +172,23 @@ def test_note_list_combines_all_filters_and_uses_semantic_sort(client) -> None:
     assert ordered.index("重大XSS") < ordered.index("低リスク")
     assert client.get("/notes?severity=Unknown").status_code == 400
     assert client.get("/notes?direction=sideways").status_code == 400
+
+
+def test_every_note_sort_supports_ascending_and_descending(client) -> None:
+    target_id = _create_target(client, _create_project(client, "並べ替え案件"))
+    _create_note(
+        client, target_id, title="Alpha", severity="Critical", status="未確認",
+        vulnerability_type="A種類", discovered_at="2026-07-15T12:00",
+    )
+    _create_note(
+        client, target_id, title="Beta", severity="Low", status="修正済み",
+        vulnerability_type="Z種類", discovered_at="2026-07-17T12:00",
+    )
+    for sort in ("title", "severity", "vulnerability_type", "discovered_at", "status", "created_at", "updated_at"):
+        ascending = client.get(f"/notes?sort={sort}&direction=asc").get_data(as_text=True)
+        descending = client.get(f"/notes?sort={sort}&direction=desc").get_data(as_text=True)
+        assert ascending.index("Alpha") < ascending.index("Beta"), sort
+        assert descending.index("Beta") < descending.index("Alpha"), sort
 
 
 def test_target_and_note_show_all_system_fields_and_note_conflict(client, settings) -> None:

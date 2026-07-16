@@ -2,6 +2,9 @@ from __future__ import annotations
 
 import logging
 
+from vulnnote_manager.database import connect_database
+from vulnnote_manager.repositories import ProjectRepository, TargetRepository, VulnerabilityNoteRepository
+
 
 def test_home_page_starts_with_safe_defaults(client) -> None:
     response = client.get("/")
@@ -53,3 +56,19 @@ def test_config_injection_uses_temporary_data_paths(app, settings) -> None:
     assert app.config["UPLOAD_DIR"] == str(settings.upload_dir)
     assert app.config["TESTING"] is True
     assert app.config["DEBUG"] is False
+
+
+def test_home_shows_recent_items_counts_and_empty_guidance(client, settings) -> None:
+    empty = client.get("/").get_data(as_text=True)
+    assert "最初の案件を登録" in empty
+    db = connect_database(settings.database_path)
+    project = ProjectRepository(db).create({"name": "最近の案件"})
+    target = TargetRepository(db).create({"project_id": project["id"], "name": "対象"})
+    VulnerabilityNoteRepository(db).create({
+        "target_id": target["id"], "title": "最近のメモ", "severity": "Critical",
+        "discovered_at": "2026-07-16T00:00:00+00:00", "status": "未確認",
+    })
+    db.close()
+    body = client.get("/").get_data(as_text=True)
+    assert "最近の案件" in body and "最近のメモ" in body
+    assert "Critical" in body and "未確認" in body

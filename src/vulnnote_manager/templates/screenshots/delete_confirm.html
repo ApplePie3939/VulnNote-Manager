@@ -1,0 +1,7 @@
+{% extends "base.html" %}
+{% block title %}画像削除確認 | VulnNote Manager{% endblock %}
+{% block content %}
+<nav class="breadcrumbs" aria-label="パンくず"><a href="{{ url_for('catalog.note_detail', note_id=screenshot.note_id) }}">メモ詳細</a> / 画像削除確認</nav>
+<div class="page-header"><div><p class="eyebrow">取り消せない操作</p><h1>画像を削除しますか</h1></div></div>
+<section class="panel"><p>「{{ screenshot.original_filename }}」を削除します。削除後は復元できません。</p><form method="post"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><input type="hidden" name="delete_scope" value="{{ delete_scope }}"><div class="actions"><button class="button button-danger" type="submit">画像を削除する</button><a href="{{ url_for('catalog.note_detail', note_id=screenshot.note_id) }}">キャンセル</a></div></form></section>
+{% endblock %}

@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any
 
 from flask import Blueprint, abort, current_app, flash, redirect, render_template, request, send_file, url_for
+from itsdangerous import BadSignature, SignatureExpired, URLSafeTimedSerializer
 
 from ..database import get_db
 from ..repositories import (
@@ -27,8 +28,9 @@ from ..validation import (
     vulnerability_type_options,
 )
 from ..services import (
-    TABLES, assess_delete, delete_entity, export_rows, make_csv, make_markdown,
-    save_screenshot, set_deletion_lock,
+    TABLES, assess_delete, delete_entities, delete_entity, delete_screenshot,
+    export_rows, make_csv, make_markdown, make_markdown_zip, reorder_screenshots, save_screenshots,
+    set_deletion_lock, update_screenshot,
 )
 
 catalog_blueprint = Blueprint("catalog", __name__)
@@ -115,6 +117,94 @@ def _run_list(
     return ListResult([dict(row) for row in rows], page, size, total, unfiltered_total)
 
 
+def _selection_scope(entity: str, items: list[dict[str, Any]]) -> str:
+    serializer = URLSafeTimedSerializer(current_app.secret_key, salt="list-selection")
+    return serializer.dumps({"entity": entity, "ids": [int(item["id"]) for item in items]})
+
+
+def _filter_scope(entity: str) -> str:
+    allowed = {
+        "project": {"q"},
+        "target": {"q", "project_id"},
+        "note": {"q", "project_id", "target_id", "severity", "status", "locked", "vulnerability_type"},
+    }[entity]
+    filters = {key: value for key, value in request.args.items() if key in allowed and value}
+    return URLSafeTimedSerializer(current_app.secret_key, salt="filtered-delete").dumps(
+        {"entity": entity, "filters": filters}
+    )
+
+
+def _filtered_ids(entity: str, token: str) -> tuple[list[int], dict[str, str]]:
+    try:
+        payload = URLSafeTimedSerializer(
+            current_app.secret_key, salt="filtered-delete"
+        ).loads(token, max_age=3600)
+    except (BadSignature, SignatureExpired, TypeError) as error:
+        raise ValueError("検索条件の確認期限が切れました。一覧からやり直してください。") from error
+    if payload.get("entity") != entity or not isinstance(payload.get("filters"), dict):
+        raise ValueError("検索条件を確認できません。一覧からやり直してください。")
+    filters: dict[str, str] = payload["filters"]
+    where: list[str] = []
+    parameters: list[object] = []
+    if filters.get("q"):
+        if entity == "project":
+            columns = ("p.name", "p.client_name", "p.summary")
+        elif entity == "target":
+            columns = ("t.name", "t.base_url", "t.summary", "p.name")
+        else:
+            columns = ("n.title", "p.name", "t.name", "n.target_url", "n.vulnerability_type", "n.summary", "n.reproduction_steps", "n.evidence", "n.impact", "n.remediation")
+        where.append("(" + " OR ".join(f"{column} LIKE ? ESCAPE '\\'" for column in columns) + ")")
+        parameters.extend([_like(filters["q"])] * len(columns))
+    for name, column in (("project_id", "p.id"), ("target_id", "t.id")):
+        if filters.get(name):
+            try:
+                value = int(filters[name])
+            except ValueError as error:
+                raise ValueError("検索条件が不正です。一覧からやり直してください。") from error
+            if value < 1:
+                raise ValueError("検索条件が不正です。一覧からやり直してください。")
+            where.append(f"{column}=?")
+            parameters.append(value)
+    if entity == "note":
+        for name, column, choices in (
+            ("severity", "n.severity", SEVERITIES), ("status", "n.status", STATUSES),
+            ("locked", "n.deletion_locked", ("0", "1")),
+        ):
+            value = filters.get(name, "")
+            if value:
+                if value not in choices:
+                    raise ValueError("検索条件が不正です。一覧からやり直してください。")
+                where.append(f"{column}=?")
+                parameters.append(int(value) if name == "locked" else value)
+        if filters.get("vulnerability_type"):
+            where.append("n.vulnerability_type=?")
+            parameters.append(filters["vulnerability_type"])
+    aliases = {"project": ("p.id", "FROM projects p"), "target": ("t.id", "FROM targets t JOIN projects p ON p.id=t.project_id"), "note": ("n.id", "FROM vulnerability_notes n JOIN targets t ON t.id=n.target_id JOIN projects p ON p.id=t.project_id")}
+    id_column, from_sql = aliases[entity]
+    predicate = f" WHERE {' AND '.join(where)}" if where else ""
+    rows = get_db().execute(f"SELECT {id_column} {from_sql}{predicate} ORDER BY {id_column}", parameters).fetchall()
+    return [int(row[0]) for row in rows], filters
+
+
+def _selected_ids(entity: str) -> list[int]:
+    raw_ids = request.form.getlist("selected_id")
+    if not raw_ids:
+        raise ValueError("削除する項目を選択してください。")
+    try:
+        ids = [int(value) for value in raw_ids]
+        if any(value < 1 for value in ids):
+            raise ValueError
+        payload = URLSafeTimedSerializer(
+            current_app.secret_key, salt="list-selection"
+        ).loads(request.form.get("selection_scope", ""), max_age=3600)
+    except (ValueError, BadSignature, SignatureExpired, TypeError) as error:
+        raise ValueError("一覧の選択状態を確認できません。画面を再読み込みしてください。") from error
+    allowed = set(payload.get("ids", [])) if payload.get("entity") == entity else set()
+    if not set(ids) <= allowed:
+        raise ValueError("表示中ではない項目が含まれています。画面を再読み込みしてください。")
+    return list(dict.fromkeys(ids))
+
+
 def _required(repository, record_id: int):
     record = repository.get(record_id)
     if record is None:
@@ -151,6 +241,8 @@ def projects():
     )
     return render_template(
         "projects/list.html", projects=result.items, listing=result,
+        selection_scope=_selection_scope("project", result.items),
+        filter_scope=_filter_scope("project"),
         query_args={key: value for key, value in request.args.items() if key != "page"},
     )
 
@@ -228,6 +320,8 @@ def targets():
     projects = get_db().execute("SELECT id, name FROM projects ORDER BY name, id").fetchall()
     return render_template(
         "targets/list.html", targets=result.items, listing=result, projects=projects,
+        selection_scope=_selection_scope("target", result.items),
+        filter_scope=_filter_scope("target"),
         query_args={key: value for key, value in request.args.items() if key != "page"},
     )
 
@@ -330,7 +424,7 @@ def notes():
         parameters.append(vulnerability_type)
     from_sql = "FROM vulnerability_notes n JOIN targets t ON t.id=n.target_id JOIN projects p ON p.id=t.project_id"
     result = _run_list(
-        select_sql="SELECT n.*, t.name AS target_name, p.name AS project_name, p.id AS project_id",
+        select_sql="SELECT n.id,n.target_id,n.title,n.target_url,n.vulnerability_type,n.severity,n.discovered_at,n.status,n.deletion_locked,n.created_at,n.updated_at,t.name AS target_name,p.name AS project_name,p.id AS project_id",
         from_sql=from_sql, where=where, parameters=parameters,
         order_sql=f"{order} {direction}, n.id DESC",
     )
@@ -340,6 +434,8 @@ def notes():
     ).fetchall()
     return render_template(
         "notes/list.html", notes=result.items, listing=result, projects=projects, targets=targets,
+        selection_scope=_selection_scope("note", result.items),
+        filter_scope=_filter_scope("note"),
         severities=SEVERITIES, statuses=STATUSES, type_options=_type_options(),
         query_args={key: value for key, value in request.args.items() if key != "page"},
     )
@@ -422,13 +518,81 @@ def delete(entity: str, record_id: int):
     except LookupError:
         abort(404)
     if request.method == "POST":
-        result = delete_entity(get_db(), entity, record_id, Path(current_app.config["UPLOAD_DIR"]))  # type: ignore[arg-type]
+        try:
+            payload = URLSafeTimedSerializer(
+                current_app.secret_key, salt="single-delete"
+            ).loads(request.form.get("delete_scope", ""), max_age=1800)
+        except (BadSignature, SignatureExpired, TypeError):
+            abort(400)
+        if payload != {"entity": entity, "record_id": record_id}:
+            abort(400)
+        result = delete_entity(
+            get_db(), entity, record_id, Path(current_app.config["UPLOAD_DIR"]),
+            Path(current_app.config["RECOVERY_DIR"]),
+        )  # type: ignore[arg-type]
         if not result.allowed:
             flash(result.reason or "削除できませんでした。", "error")
         else:
             flash("削除しました。この操作は取り消せません。", "success")
         return redirect(url_for(f"catalog.{entity}s"))
-    return render_template("delete_confirm.html", assessment=assessment)
+    delete_scope = URLSafeTimedSerializer(
+        current_app.secret_key, salt="single-delete"
+    ).dumps({"entity": entity, "record_id": record_id})
+    return render_template("delete_confirm.html", assessment=assessment, delete_scope=delete_scope)
+
+
+@catalog_blueprint.post("/<entity>/bulk-delete")
+def bulk_delete(entity: str):
+    if entity not in TABLES:
+        abort(404)
+    try:
+        record_ids = _selected_ids(entity)
+        assessments = [assess_delete(get_db(), entity, value) for value in record_ids]  # type: ignore[arg-type]
+    except LookupError:
+        abort(400)
+    except ValueError as error:
+        flash(str(error), "error")
+        return redirect(url_for(f"catalog.{entity}s"))
+    if request.form.get("confirmed") != "1":
+        return render_template(
+            "bulk_delete_confirm.html", entity=entity, assessments=assessments,
+            selected_ids=record_ids, selection_scope=request.form["selection_scope"],
+        )
+    deleted, retained = delete_entities(
+        get_db(), entity, record_ids, Path(current_app.config["UPLOAD_DIR"]),
+        Path(current_app.config["RECOVERY_DIR"]),
+    )  # type: ignore[arg-type]
+    if deleted:
+        flash(f"{len(deleted)}件を削除しました。この操作は取り消せません。", "success")
+    if retained:
+        reasons = " ".join(f"ID {item.record_id}: {item.reason}" for item in retained)
+        flash(f"{len(retained)}件は削除せず残しました。{reasons}", "error")
+    return redirect(url_for(f"catalog.{entity}s"))
+
+
+@catalog_blueprint.post("/<entity>/filtered-delete")
+def filtered_delete(entity: str):
+    if entity not in TABLES:
+        abort(404)
+    token = request.form.get("filter_scope", "")
+    try:
+        record_ids, filters = _filtered_ids(entity, token)
+    except ValueError as error:
+        flash(str(error), "error")
+        return redirect(url_for(f"catalog.{entity}s"))
+    if request.form.get("confirmed") != "1":
+        return render_template(
+            "filtered_delete_confirm.html", entity=entity, total=len(record_ids),
+            filters=filters, filter_scope=token,
+        )
+    deleted, retained = delete_entities(
+        get_db(), entity, record_ids, Path(current_app.config["UPLOAD_DIR"]),
+        Path(current_app.config["RECOVERY_DIR"]),
+    )  # type: ignore[arg-type]
+    flash(f"検索条件に一致した項目のうち{len(deleted)}件を削除しました。", "success")
+    if retained:
+        flash(f"削除ロックにより{len(retained)}件を残しました。", "error")
+    return redirect(url_for(f"catalog.{entity}s"))
 
 
 @catalog_blueprint.post("/notes/<int:note_id>/screenshots")
@@ -439,8 +603,10 @@ def screenshot_upload(note_id: int):
         flash("アップロードする画像を選択してください。", "error")
         return redirect(url_for("catalog.note_detail", note_id=note_id))
     try:
-        for upload in uploads:
-            save_screenshot(get_db(), note_id, Path(current_app.config["UPLOAD_DIR"]), upload, request.form.get("description", ""))
+        save_screenshots(
+            get_db(), note_id, Path(current_app.config["UPLOAD_DIR"]), uploads,
+            request.form.get("description", ""),
+        )
     except (ValueError, OSError, sqlite3.Error) as error:
         flash(str(error) if isinstance(error, ValueError) else "画像を保存できませんでした。保存先と空き容量を確認してください。", "error")
     else:
@@ -462,18 +628,85 @@ def screenshot_content(screenshot_id: int):
     return response
 
 
-@catalog_blueprint.post("/screenshots/<int:screenshot_id>/delete")
+@catalog_blueprint.route("/screenshots/<int:screenshot_id>/delete", methods=["GET", "POST"])
 def screenshot_delete(screenshot_id: int):
     db = get_db()
     row = db.execute("SELECT * FROM screenshots WHERE id=?", (screenshot_id,)).fetchone()
     if row is None:
         abort(404)
-    db.execute("DELETE FROM screenshots WHERE id=?", (screenshot_id,))
+    if request.method == "GET":
+        delete_scope = URLSafeTimedSerializer(
+            current_app.secret_key, salt="screenshot-delete"
+        ).dumps({"screenshot_id": screenshot_id, "note_id": int(row["note_id"])})
+        return render_template(
+            "screenshots/delete_confirm.html", screenshot=row, delete_scope=delete_scope
+        )
     try:
-        (Path(current_app.config["UPLOAD_DIR"]) / row["stored_filename"]).unlink(missing_ok=True)
+        payload = URLSafeTimedSerializer(
+            current_app.secret_key, salt="screenshot-delete"
+        ).loads(request.form.get("delete_scope", ""), max_age=1800)
+    except (BadSignature, SignatureExpired, TypeError):
+        abort(400)
+    if payload != {"screenshot_id": screenshot_id, "note_id": int(row["note_id"])}:
+        abort(400)
+    try:
+        note_id = delete_screenshot(
+            db, screenshot_id, Path(current_app.config["UPLOAD_DIR"]),
+            Path(current_app.config["RECOVERY_DIR"]),
+        )
     except OSError:
-        pass
+        flash("画像を削除できませんでした。保存先の権限と空き容量を確認してください。", "error")
+        return redirect(url_for("catalog.note_detail", note_id=row["note_id"]))
     flash("画像を削除しました。", "success")
+    return redirect(url_for("catalog.note_detail", note_id=note_id))
+
+
+@catalog_blueprint.post("/screenshots/<int:screenshot_id>/edit")
+def screenshot_edit(screenshot_id: int):
+    try:
+        screenshot = update_screenshot(
+            get_db(), screenshot_id, description=request.form.get("description", "")
+        )
+    except LookupError:
+        abort(404)
+    flash("画像の説明を更新しました。", "success")
+    return redirect(url_for("catalog.note_detail", note_id=screenshot["note_id"]))
+
+
+@catalog_blueprint.post("/notes/<int:note_id>/screenshots/reorder")
+def screenshot_reorder(note_id: int):
+    _required(VulnerabilityNoteRepository(get_db()), note_id)
+    raw_ids = request.form.getlist("screenshot_id")
+    try:
+        ordered_ids = [int(value) for value in raw_ids]
+        if any(value < 1 for value in ordered_ids):
+            raise ValueError
+        reorder_screenshots(get_db(), note_id, ordered_ids)
+    except ValueError as error:
+        flash(str(error) or "画像の並び順が不正です。画面を再読み込みしてください。", "error")
+    else:
+        flash("画像の表示順を更新しました。", "success")
+    return redirect(url_for("catalog.note_detail", note_id=note_id))
+
+
+@catalog_blueprint.post("/screenshots/<int:screenshot_id>/move")
+def screenshot_move(screenshot_id: int):
+    db = get_db()
+    row = db.execute("SELECT note_id FROM screenshots WHERE id=?", (screenshot_id,)).fetchone()
+    if row is None:
+        abort(404)
+    direction = request.form.get("direction")
+    if direction not in {"up", "down"}:
+        abort(400)
+    ids = [int(item[0]) for item in db.execute(
+        "SELECT id FROM screenshots WHERE note_id=? ORDER BY display_order", (row["note_id"],)
+    )]
+    index = ids.index(screenshot_id)
+    other = index - 1 if direction == "up" else index + 1
+    if 0 <= other < len(ids):
+        ids[index], ids[other] = ids[other], ids[index]
+        reorder_screenshots(db, int(row["note_id"]), ids)
+        flash("画像の表示順を更新しました。", "success")
     return redirect(url_for("catalog.note_detail", note_id=row["note_id"]))
 
 
@@ -489,6 +722,11 @@ def note_export(note_id: int, format: str):
     if format == "csv":
         return _download(make_csv(rows), f"note-{note_id}.csv", "text/csv; charset=utf-8")
     if format == "markdown":
+        if any(row.get("screenshot_items") for row in rows):
+            return _download(
+                make_markdown_zip(rows, Path(current_app.config["UPLOAD_DIR"]), f"note-{note_id}.md"),
+                f"note-{note_id}.zip", "application/zip",
+            )
         return _download(make_markdown(rows).encode(), f"note-{note_id}.md", "text/markdown; charset=utf-8")
     abort(404)
 
@@ -502,5 +740,10 @@ def project_export(project_id: int, format: str):
     if format == "markdown":
         project = _required(ProjectRepository(get_db()), project_id)
         body = make_markdown(rows) if rows else f"# {project['name']}\n\n脆弱性メモは未記入です。\n"
+        if rows and any(row.get("screenshot_items") for row in rows):
+            return _download(
+                make_markdown_zip(rows, Path(current_app.config["UPLOAD_DIR"]), f"project-{project_id}.md"),
+                f"project-{project_id}.zip", "application/zip",
+            )
         return _download(body.encode(), f"project-{project_id}.md", "text/markdown; charset=utf-8")
     abort(404)

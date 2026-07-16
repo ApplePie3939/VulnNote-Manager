@@ -47,3 +47,13 @@ if (projectFilter && targetFilter) {
   projectFilter.addEventListener("change", updateTargetOptions);
   updateTargetOptions();
 }
+
+const selectionItems = document.querySelectorAll("[data-select-item]");
+const selectionCount = document.querySelector("[data-selection-count]");
+if (selectionItems.length && selectionCount) {
+  const updateSelectionCount = () => {
+    const count = [...selectionItems].filter((item) => item.checked).length;
+    selectionCount.textContent = `${count}件選択`;
+  };
+  selectionItems.forEach((item) => item.addEventListener("change", updateSelectionCount));
+}

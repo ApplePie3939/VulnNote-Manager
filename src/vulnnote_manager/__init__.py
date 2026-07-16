@@ -12,6 +12,7 @@ from .database import init_database
 from .errors import register_error_handlers
 from .presentation.main import main_blueprint
 from .presentation.catalog import catalog_blueprint
+from .presentation.ai import ai_blueprint
 from .security import apply_security_headers, init_security
 
 
@@ -46,6 +47,7 @@ def create_app(
     init_security(app)
     app.register_blueprint(main_blueprint)
     app.register_blueprint(catalog_blueprint)
+    app.register_blueprint(ai_blueprint)
     register_error_handlers(app)
     app.after_request(apply_security_headers)
     return app

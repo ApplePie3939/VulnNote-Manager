@@ -89,7 +89,21 @@ INITIAL_SCHEMA = (
     "CREATE INDEX idx_screenshots_note_id ON screenshots(note_id)",
 )
 
-MIGRATIONS: tuple[tuple[str, ...], ...] = (INITIAL_SCHEMA,)
+SEARCH_INDEXES = (
+    "CREATE INDEX idx_projects_updated_name ON projects(updated_at, name)",
+    "CREATE INDEX idx_targets_project_updated ON targets(project_id, updated_at)",
+    "CREATE INDEX idx_notes_target_severity_status ON vulnerability_notes(target_id, severity, status)",
+    "CREATE INDEX idx_notes_status_updated ON vulnerability_notes(status, updated_at)",
+    "CREATE INDEX idx_screenshots_note_order ON screenshots(note_id, display_order)",
+)
+
+COMPOSITE_SEARCH_INDEXES = (
+    "CREATE INDEX idx_notes_target_severity_status_updated ON vulnerability_notes(target_id, severity, status, updated_at)",
+)
+
+MIGRATIONS: tuple[tuple[str, ...], ...] = (
+    INITIAL_SCHEMA, SEARCH_INDEXES, COMPOSITE_SEARCH_INDEXES,
+)
 
 
 def connect_database(path: str | Path) -> sqlite3.Connection:

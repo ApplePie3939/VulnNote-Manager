@@ -99,7 +99,10 @@ def test_image_upload_delivery_and_delete(client, settings) -> None:
     assert delivered.status_code == 200
     assert delivered.content_type == "image/png"
     assert delivered.headers["Cache-Control"] == "private, no-store"
-    deleted = client.post(f"/screenshots/{shot_id}/delete", data={"csrf_token": _csrf(client)})
+    confirmation = client.get(f"/screenshots/{shot_id}/delete").get_data(as_text=True)
+    import re
+    delete_scope = re.search(r'name="delete_scope" value="([^"]+)"', confirmation).group(1)
+    deleted = client.post(f"/screenshots/{shot_id}/delete", data={"csrf_token": _csrf(client), "delete_scope": delete_scope})
     assert deleted.status_code == 302
 
 
