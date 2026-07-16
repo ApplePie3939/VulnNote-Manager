@@ -1,8 +1,17 @@
 {% extends "base.html" %}
+{% from "_components.html" import badge, pagination %}
 {% block title %}案件一覧 | VulnNote Manager{% endblock %}
 {% block content %}
+<nav class="breadcrumbs" aria-label="パンくず"><a href="{{ url_for('main.index') }}">ホーム</a> / 案件一覧</nav>
 <div class="page-header"><div><p class="eyebrow">案件管理</p><h1>案件一覧</h1></div><a class="button" href="{{ url_for('catalog.project_new') }}">案件を登録</a></div>
+<form class="panel filter-form" method="get" role="search">
+  <div class="field"><label for="project-q">案件を検索</label><input id="project-q" name="q" value="{{ request.args.get('q', '') }}" placeholder="案件名、顧客名、概要"></div>
+  <div class="field"><label for="project-sort">並べ替え</label><select id="project-sort" name="sort">{% for value, label in [('updated_at','更新日時'),('name','案件名'),('client_name','顧客名'),('start_date','開始日'),('end_date','終了日')] %}<option value="{{ value }}" {% if request.args.get('sort','updated_at') == value %}selected{% endif %}>{{ label }}</option>{% endfor %}</select></div>
+  <div class="field"><label for="project-direction">順序</label><select id="project-direction" name="direction"><option value="desc" {% if request.args.get('direction','desc') == 'desc' %}selected{% endif %}>降順</option><option value="asc" {% if request.args.get('direction') == 'asc' %}selected{% endif %}>昇順</option></select></div>
+  <div class="actions"><button class="button" type="submit">適用</button>{% if request.args %}<a href="{{ url_for('catalog.projects') }}">条件を解除</a>{% endif %}</div>
+</form>
 {% if projects %}<div class="data-list">
-{% for project in projects %}<article class="data-card"><h2><a href="{{ url_for('catalog.project_detail', project_id=project.id) }}">{{ project.name }}</a></h2><p>{{ project.client_name or '顧客名：未入力' }}</p><span class="badge">{{ '削除ロック中' if project.deletion_locked else '削除ロック解除' }}</span></article>{% endfor %}
-</div>{% else %}<div class="panel"><h2>案件はまだありません</h2><p>最初の診断案件を登録してください。</p></div>{% endif %}
+{% for project in projects %}<article class="data-card"><h2><a href="{{ url_for('catalog.project_detail', project_id=project.id) }}">{{ project.name }}</a></h2><p>{{ project.client_name or '顧客名：未入力' }}</p>{{ badge('削除ロック中' if project.deletion_locked else '削除ロック解除', 'lock') }}<p class="meta">更新日時 {{ project.updated_at }}</p></article>{% endfor %}
+</div>{% elif listing.unfiltered_total %}<div class="panel empty-state"><h2>条件に一致する案件はありません</h2><p>検索語や並べ替え条件を確認してください。</p><a class="button button-secondary" href="{{ url_for('catalog.projects') }}">条件を解除</a></div>{% else %}<div class="panel empty-state"><h2>案件はまだありません</h2><p>最初の診断案件を登録してください。</p><a class="button" href="{{ url_for('catalog.project_new') }}">案件を登録</a></div>{% endif %}
+{{ pagination(listing, 'catalog.projects', query_args) }}
 {% endblock %}

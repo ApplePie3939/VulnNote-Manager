@@ -1,1 +1,16 @@
-{% extends "base.html" %}{% block title %}{{ target.name }} | VulnNote Manager{% endblock %}{% block content %}<nav class="breadcrumbs" aria-label="パンくず"><a href="{{ url_for('catalog.project_detail', project_id=project.id) }}">{{ project.name }}</a> / {{ target.name }}</nav><div class="page-header"><div><p class="eyebrow">対象詳細</p><h1>{{ target.name }}</h1></div><a class="button button-secondary" href="{{ url_for('catalog.target_edit', target_id=target.id) }}">編集</a></div><section class="panel"><dl class="definition-grid"><dt>所属案件</dt><dd>{{ project.name }}</dd><dt>ベースURL</dt><dd>{{ target.base_url or '未入力' }}</dd><dt>概要</dt><dd>{{ target.summary or '未入力' }}</dd><dt>削除ロック</dt><dd>{{ '有効' if target.deletion_locked else '解除' }}</dd><dt>更新日時</dt><dd>{{ target.updated_at }}</dd></dl></section><div class="page-header"><h2>脆弱性メモ</h2><a class="button" href="{{ url_for('catalog.note_new', target_id=target.id) }}">メモを登録</a></div><div class="data-list">{% for note in notes %}<article class="data-card"><h2><a href="{{ url_for('catalog.note_detail', note_id=note.id) }}">{{ note.title }}</a></h2><span class="badge">{{ note.severity }}</span> <span class="badge">{{ note.status }}</span></article>{% else %}<p>メモはまだありません。</p>{% endfor %}</div>{% endblock %}
+{% extends "base.html" %}{% from "_components.html" import badge %}
+{% block title %}{{ target.name }} | VulnNote Manager{% endblock %}
+{% block content %}
+<nav class="breadcrumbs" aria-label="パンくず"><a href="{{ url_for('catalog.projects') }}">案件一覧</a> / <a href="{{ url_for('catalog.project_detail', project_id=project.id) }}">{{ project.name }}</a> / {{ target.name }}</nav>
+<div class="page-header"><div><p class="eyebrow">対象詳細</p><h1>{{ target.name }}</h1></div><a class="button button-secondary" href="{{ url_for('catalog.target_edit', target_id=target.id) }}">編集</a></div>
+<section class="panel"><dl class="definition-grid">
+  <dt>所属案件</dt><dd>{{ project.name }}</dd>
+  <dt>ベースURL</dt><dd>{{ target.base_url or '未入力' }}</dd>
+  <dt>概要</dt><dd>{{ target.summary or '未入力' }}</dd>
+  <dt>削除ロック</dt><dd>{{ badge('削除ロック中' if target.deletion_locked else '削除ロック解除', 'lock') }}</dd>
+  <dt>作成日時</dt><dd>{{ target.created_at }}</dd>
+  <dt>更新日時</dt><dd>{{ target.updated_at }}</dd>
+</dl></section>
+<div class="page-header"><h2>脆弱性メモ</h2><a class="button" href="{{ url_for('catalog.note_new', target_id=target.id) }}">メモを登録</a></div>
+<div class="data-list">{% for note in notes %}<article class="data-card"><h2><a href="{{ url_for('catalog.note_detail', note_id=note.id) }}">{{ note.title }}</a></h2><div class="badge-row">{{ badge(note.severity, 'severity') }} {{ badge(note.status) }}</div></article>{% else %}<p>メモはまだありません。</p>{% endfor %}</div>
+{% endblock %}

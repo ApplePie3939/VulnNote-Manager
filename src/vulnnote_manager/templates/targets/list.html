@@ -1,1 +1,14 @@
-{% extends "base.html" %}{% block title %}対象一覧 | VulnNote Manager{% endblock %}{% block content %}<div class="page-header"><div><p class="eyebrow">対象管理</p><h1>対象一覧</h1></div></div><div class="data-list">{% for target in targets %}<article class="data-card"><p class="meta">{{ target.project_name }}</p><h2><a href="{{ url_for('catalog.target_detail', target_id=target.id) }}">{{ target.name }}</a></h2><p>{{ target.base_url or 'ベースURL：未入力' }}</p><span class="badge">{{ '削除ロック中' if target.deletion_locked else '削除ロック解除' }}</span></article>{% else %}<div class="panel"><p>対象はまだありません。案件詳細から登録できます。</p></div>{% endfor %}</div>{% endblock %}
+{% extends "base.html" %}{% from "_components.html" import badge, pagination %}
+{% block title %}対象一覧 | VulnNote Manager{% endblock %}{% block content %}
+<nav class="breadcrumbs" aria-label="パンくず"><a href="{{ url_for('main.index') }}">ホーム</a> / 対象一覧</nav>
+<div class="page-header"><div><p class="eyebrow">対象管理</p><h1>対象一覧</h1></div></div>
+<form class="panel filter-form" method="get" role="search">
+  <div class="field"><label for="target-q">対象を検索</label><input id="target-q" name="q" value="{{ request.args.get('q','') }}" placeholder="対象名、URL、概要、案件名"></div>
+  <div class="field"><label for="target-project">案件</label><select id="target-project" name="project_id"><option value="">すべて</option>{% for project in projects %}<option value="{{ project.id }}" {% if request.args.get('project_id') == project.id|string %}selected{% endif %}>{{ project.name }}</option>{% endfor %}</select></div>
+  <div class="field"><label for="target-sort">並べ替え</label><select id="target-sort" name="sort">{% for value,label in [('updated_at','更新日時'),('project','案件'),('name','対象名'),('base_url','ベースURL')] %}<option value="{{ value }}" {% if request.args.get('sort','updated_at') == value %}selected{% endif %}>{{ label }}</option>{% endfor %}</select></div>
+  <div class="field"><label for="target-direction">順序</label><select id="target-direction" name="direction"><option value="desc" {% if request.args.get('direction','desc') == 'desc' %}selected{% endif %}>降順</option><option value="asc" {% if request.args.get('direction') == 'asc' %}selected{% endif %}>昇順</option></select></div>
+  <div class="actions"><button class="button">適用</button>{% if request.args %}<a href="{{ url_for('catalog.targets') }}">条件を解除</a>{% endif %}</div>
+</form>
+<div class="data-list">{% for target in targets %}<article class="data-card"><p class="meta">{{ target.project_name }}</p><h2><a href="{{ url_for('catalog.target_detail', target_id=target.id) }}">{{ target.name }}</a></h2><p>{{ target.base_url or 'ベースURL：未入力' }}</p>{{ badge('削除ロック中' if target.deletion_locked else '削除ロック解除', 'lock') }}<p class="meta">更新日時 {{ target.updated_at }}</p></article>{% else %}<div class="panel empty-state">{% if listing.unfiltered_total %}<h2>条件に一致する対象はありません</h2><a class="button button-secondary" href="{{ url_for('catalog.targets') }}">条件を解除</a>{% else %}<h2>対象はまだありません</h2><p>案件詳細から登録できます。</p>{% endif %}</div>{% endfor %}</div>
+{{ pagination(listing, 'catalog.targets', query_args) }}
+{% endblock %}

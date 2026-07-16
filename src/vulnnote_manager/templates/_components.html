@@ -1,0 +1,16 @@
+{% macro badge(text, kind='status') -%}
+<span class="badge badge-{{ kind }} {{ kind }}-{{ text|lower }}">{{ text }}</span>
+{%- endmacro %}
+
+{% macro pagination(listing, endpoint, query_args) -%}
+{% if listing.total %}
+<nav class="pagination" aria-label="ページ移動">
+  <p>{{ listing.total }}件中 {{ listing.first_item }}〜{{ listing.last_item }}件を表示</p>
+  <div class="pagination-links">
+    {% if listing.page > 1 %}<a class="button button-secondary" rel="prev" href="{{ url_for(endpoint, page=listing.page - 1, **query_args) }}">前のページ</a>{% endif %}
+    <span>{{ listing.page }} / {{ listing.total_pages }}ページ</span>
+    {% if listing.page < listing.total_pages %}<a class="button button-secondary" rel="next" href="{{ url_for(endpoint, page=listing.page + 1, **query_args) }}">次のページ</a>{% endif %}
+  </div>
+</nav>
+{% endif %}
+{%- endmacro %}
