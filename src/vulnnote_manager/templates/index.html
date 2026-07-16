@@ -1,13 +1,5 @@
-{% extends "base.html" %}
-{% block title %}ホーム — VulnNote Manager{% endblock %}
-{% block content %}
-  <section class="hero" aria-labelledby="page-title">
-    <p class="eyebrow">診断記録を、確かな報告へ</p>
-    <h1 id="page-title">VulnNote Manager</h1>
-    <p class="lead">脆弱性診断中の断片的なメモを、案件・対象・脆弱性ごとに安全に整理します。</p>
-  </section>
-  <section class="panel" aria-labelledby="development-status">
-    <h2 id="development-status">準備ができました</h2>
-    <p>アプリケーション基盤は正常に起動しています。案件管理機能は現在実装中です。</p>
-  </section>
+{% extends "base.html" %}{% block title %}ホーム — VulnNote Manager{% endblock %}{% block content %}
+<section class="hero"><p class="eyebrow">診断記録を、確かな報告へ</p><h1>VulnNote Manager</h1><p class="lead">断片的なメモを案件・対象・脆弱性ごとに安全に整理します。</p><div class="actions"><a class="button" href="{{ url_for('catalog.project_new') }}">案件を登録</a><a class="button button-secondary" href="{{ url_for('catalog.notes') }}">メモ一覧</a></div></section>
+<section class="summary-grid" aria-label="登録件数"><div class="data-card"><strong>{{ totals.projects }}</strong><span>案件</span></div><div class="data-card"><strong>{{ totals.targets }}</strong><span>対象</span></div><div class="data-card"><strong>{{ totals.notes }}</strong><span>脆弱性メモ</span></div></section>
+{% if totals.projects %}<div class="dashboard-grid"><section class="panel"><h2>最近更新した案件</h2>{% for item in projects %}<p><a href="{{ url_for('catalog.project_detail', project_id=item.id) }}">{{ item.name }}</a><br><span class="meta">{{ item.updated_at }}</span></p>{% endfor %}</section><section class="panel"><h2>最近更新したメモ</h2>{% for item in notes %}<p><a href="{{ url_for('catalog.note_detail', note_id=item.id) }}">{{ item.title }}</a> <span class="badge">{{ item.severity }}</span><br><span class="meta">{{ item.updated_at }}</span></p>{% else %}<p>メモはまだありません。</p>{% endfor %}</section><section class="panel"><h2>危険度別</h2>{% for item in severity_counts %}<p>{{ item.severity }}: {{ item.count }}件</p>{% else %}<p>集計対象はありません。</p>{% endfor %}</section><section class="panel"><h2>対応状況別</h2>{% for item in status_counts %}<p>{{ item.status }}: {{ item.count }}件</p>{% else %}<p>集計対象はありません。</p>{% endfor %}</section></div>{% else %}<section class="panel empty-state"><h2>最初の案件を登録しましょう</h2><p>案件を作成した後、対象と脆弱性メモを順に追加できます。</p><a class="button" href="{{ url_for('catalog.project_new') }}">案件を登録</a></section>{% endif %}
 {% endblock %}

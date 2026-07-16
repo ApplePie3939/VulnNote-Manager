@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+import io
 import sqlite3
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 
-from flask import Blueprint, abort, current_app, flash, redirect, render_template, request, url_for
+from flask import Blueprint, abort, current_app, flash, redirect, render_template, request, send_file, url_for
 
 from ..database import get_db
 from ..repositories import (
@@ -23,6 +25,10 @@ from ..validation import (
     validate_project,
     validate_target,
     vulnerability_type_options,
+)
+from ..services import (
+    TABLES, assess_delete, delete_entity, export_rows, make_csv, make_markdown,
+    save_screenshot, set_deletion_lock,
 )
 
 catalog_blueprint = Blueprint("catalog", __name__)
@@ -366,7 +372,10 @@ def note_detail(note_id: int):
     note = _required(VulnerabilityNoteRepository(get_db()), note_id)
     target = _required(TargetRepository(get_db()), note["target_id"])
     project = _required(ProjectRepository(get_db()), target["project_id"])
-    return render_template("notes/detail.html", note=note, target=target, project=project)
+    screenshots = get_db().execute(
+        "SELECT * FROM screenshots WHERE note_id=? ORDER BY display_order", (note_id,)
+    ).fetchall()
+    return render_template("notes/detail.html", note=note, target=target, project=project, screenshots=screenshots)
 
 
 @catalog_blueprint.route("/notes/<int:note_id>/edit", methods=["GET", "POST"])
@@ -389,3 +398,109 @@ def note_edit(note_id: int):
                 flash(warning, "warning")
             return redirect(url_for("catalog.note_detail", note_id=note_id))
     return render_template("notes/form.html", target=target, project=project, note=note, values=values, errors=errors, warnings=warnings, severities=SEVERITIES, statuses=STATUSES, type_options=_type_options()), (422 if errors else 200)
+
+
+@catalog_blueprint.post("/<entity>/<int:record_id>/lock")
+def toggle_lock(entity: str, record_id: int):
+    if entity not in TABLES:
+        abort(404)
+    try:
+        set_deletion_lock(get_db(), entity, record_id, request.form.get("locked") == "1")  # type: ignore[arg-type]
+    except LookupError:
+        abort(404)
+    flash("削除ロックを変更しました。", "success")
+    next_url = request.form.get("next", "")
+    return redirect(next_url if next_url.startswith("/") and not next_url.startswith("//") else url_for(f"catalog.{entity}s"))
+
+
+@catalog_blueprint.route("/<entity>/<int:record_id>/delete", methods=["GET", "POST"])
+def delete(entity: str, record_id: int):
+    if entity not in TABLES:
+        abort(404)
+    try:
+        assessment = assess_delete(get_db(), entity, record_id)  # type: ignore[arg-type]
+    except LookupError:
+        abort(404)
+    if request.method == "POST":
+        result = delete_entity(get_db(), entity, record_id, Path(current_app.config["UPLOAD_DIR"]))  # type: ignore[arg-type]
+        if not result.allowed:
+            flash(result.reason or "削除できませんでした。", "error")
+        else:
+            flash("削除しました。この操作は取り消せません。", "success")
+        return redirect(url_for(f"catalog.{entity}s"))
+    return render_template("delete_confirm.html", assessment=assessment)
+
+
+@catalog_blueprint.post("/notes/<int:note_id>/screenshots")
+def screenshot_upload(note_id: int):
+    _required(VulnerabilityNoteRepository(get_db()), note_id)
+    uploads = [item for item in request.files.getlist("images") if item.filename]
+    if not uploads:
+        flash("アップロードする画像を選択してください。", "error")
+        return redirect(url_for("catalog.note_detail", note_id=note_id))
+    try:
+        for upload in uploads:
+            save_screenshot(get_db(), note_id, Path(current_app.config["UPLOAD_DIR"]), upload, request.form.get("description", ""))
+    except (ValueError, OSError, sqlite3.Error) as error:
+        flash(str(error) if isinstance(error, ValueError) else "画像を保存できませんでした。保存先と空き容量を確認してください。", "error")
+    else:
+        flash(f"画像を{len(uploads)}件追加しました。", "success")
+    return redirect(url_for("catalog.note_detail", note_id=note_id))
+
+
+@catalog_blueprint.get("/screenshots/<int:screenshot_id>/content")
+def screenshot_content(screenshot_id: int):
+    row = get_db().execute("SELECT * FROM screenshots WHERE id=?", (screenshot_id,)).fetchone()
+    if row is None:
+        abort(404)
+    path = Path(current_app.config["UPLOAD_DIR"]) / row["stored_filename"]
+    if not path.is_file():
+        abort(404)
+    response = send_file(path, mimetype=row["mime_type"], conditional=True, max_age=0)
+    response.headers["Cache-Control"] = "private, no-store"
+    response.headers["Content-Disposition"] = "inline"
+    return response
+
+
+@catalog_blueprint.post("/screenshots/<int:screenshot_id>/delete")
+def screenshot_delete(screenshot_id: int):
+    db = get_db()
+    row = db.execute("SELECT * FROM screenshots WHERE id=?", (screenshot_id,)).fetchone()
+    if row is None:
+        abort(404)
+    db.execute("DELETE FROM screenshots WHERE id=?", (screenshot_id,))
+    try:
+        (Path(current_app.config["UPLOAD_DIR"]) / row["stored_filename"]).unlink(missing_ok=True)
+    except OSError:
+        pass
+    flash("画像を削除しました。", "success")
+    return redirect(url_for("catalog.note_detail", note_id=row["note_id"]))
+
+
+def _download(data: bytes, filename: str, mimetype: str):
+    return send_file(io.BytesIO(data), mimetype=mimetype, as_attachment=True, download_name=filename)
+
+
+@catalog_blueprint.get("/notes/<int:note_id>/exports/<format>")
+def note_export(note_id: int, format: str):
+    rows = export_rows(get_db(), note_id=note_id)
+    if not rows:
+        abort(404)
+    if format == "csv":
+        return _download(make_csv(rows), f"note-{note_id}.csv", "text/csv; charset=utf-8")
+    if format == "markdown":
+        return _download(make_markdown(rows).encode(), f"note-{note_id}.md", "text/markdown; charset=utf-8")
+    abort(404)
+
+
+@catalog_blueprint.get("/projects/<int:project_id>/exports/<format>")
+def project_export(project_id: int, format: str):
+    _required(ProjectRepository(get_db()), project_id)
+    rows = export_rows(get_db(), project_id=project_id)
+    if format == "csv":
+        return _download(make_csv(rows), f"project-{project_id}.csv", "text/csv; charset=utf-8")
+    if format == "markdown":
+        project = _required(ProjectRepository(get_db()), project_id)
+        body = make_markdown(rows) if rows else f"# {project['name']}\n\n脆弱性メモは未記入です。\n"
+        return _download(body.encode(), f"project-{project_id}.md", "text/markdown; charset=utf-8")
+    abort(404)

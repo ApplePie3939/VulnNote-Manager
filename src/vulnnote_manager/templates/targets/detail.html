@@ -10,7 +10,7 @@
   <dt>削除ロック</dt><dd>{{ badge('削除ロック中' if target.deletion_locked else '削除ロック解除', 'lock') }}</dd>
   <dt>作成日時</dt><dd>{{ target.created_at }}</dd>
   <dt>更新日時</dt><dd>{{ target.updated_at }}</dd>
-</dl></section>
+</dl><div class="actions"><form method="post" action="{{ url_for('catalog.toggle_lock', entity='target', record_id=target.id) }}"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><input type="hidden" name="locked" value="{{ 0 if target.deletion_locked else 1 }}"><input type="hidden" name="next" value="{{ request.path }}"><button class="button button-secondary" type="submit">削除ロックを{{ '解除' if target.deletion_locked else '有効化' }}</button></form><a class="button button-danger" href="{{ url_for('catalog.delete', entity='target', record_id=target.id) }}">削除</a></div></section>
 <div class="page-header"><h2>脆弱性メモ</h2><a class="button" href="{{ url_for('catalog.note_new', target_id=target.id) }}">メモを登録</a></div>
 <div class="data-list">{% for note in notes %}<article class="data-card"><h2><a href="{{ url_for('catalog.note_detail', note_id=note.id) }}">{{ note.title }}</a></h2><div class="badge-row">{{ badge(note.severity, 'severity') }} {{ badge(note.status) }}</div></article>{% else %}<p>メモはまだありません。</p>{% endfor %}</div>
 {% endblock %}

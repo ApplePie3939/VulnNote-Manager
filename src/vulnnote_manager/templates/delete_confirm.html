@@ -1,0 +1,6 @@
+{% extends "base.html" %}{% block title %}削除確認 | VulnNote Manager{% endblock %}{% block content %}
+<nav class="breadcrumbs" aria-label="パンくず"><a href="{{ url_for('main.index') }}">ホーム</a> / 削除確認</nav>
+<div class="page-header"><div><p class="eyebrow">取り消せない操作</p><h1>削除の確認</h1></div></div>
+<section class="panel"><p>案件 {{ assessment.projects }}件、対象 {{ assessment.targets }}件、脆弱性メモ {{ assessment.notes }}件、画像 {{ assessment.screenshots }}件が削除対象です。</p>
+{% if assessment.allowed %}<p><strong>削除後は復元できません。</strong></p><form method="post"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button class="button button-danger" type="submit">内容を確認して削除する</button></form>{% else %}<div class="notice notice-error" role="alert">{{ assessment.reason }}</div>{% endif %}
+</section>{% endblock %}
