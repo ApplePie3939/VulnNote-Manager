@@ -8,9 +8,11 @@ from typing import Any
 from flask import Flask
 
 from .config import Settings, load_settings, prepare_data_directories
+from .database import init_database
 from .errors import register_error_handlers
 from .presentation.main import main_blueprint
-from .security import apply_security_headers
+from .presentation.catalog import catalog_blueprint
+from .security import apply_security_headers, init_security
 
 
 def create_app(
@@ -40,7 +42,10 @@ def create_app(
     if config_overrides:
         app.config.from_mapping(config_overrides)
 
+    init_database(app)
+    init_security(app)
     app.register_blueprint(main_blueprint)
+    app.register_blueprint(catalog_blueprint)
     register_error_handlers(app)
     app.after_request(apply_security_headers)
     return app

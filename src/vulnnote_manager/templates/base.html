@@ -5,16 +5,25 @@
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>{% block title %}VulnNote Manager{% endblock %}</title>
     <link rel="stylesheet" href="{{ url_for('static', filename='css/app.css') }}">
+    <script src="{{ url_for('static', filename='js/app.js') }}" defer></script>
   </head>
   <body>
     <a class="skip-link" href="#main-content">本文へ移動</a>
     <header class="site-header">
       <div class="container header-content">
         <a class="brand" href="{{ url_for('main.index') }}">VulnNote Manager</a>
+        <nav aria-label="グローバルナビゲーション">
+          <a href="{{ url_for('catalog.projects') }}">案件</a>
+          <a href="{{ url_for('catalog.targets') }}">対象</a>
+          <a href="{{ url_for('catalog.notes') }}">脆弱性メモ</a>
+        </nav>
         <span class="local-badge">ローカル専用</span>
       </div>
     </header>
     <main id="main-content" class="container" tabindex="-1">
+      {% for category, message in get_flashed_messages(with_categories=true) %}
+        <div class="notice notice-{{ category }}" role="status">{{ message }}</div>
+      {% endfor %}
       {% block content %}{% endblock %}
     </main>
     <footer class="container site-footer">
